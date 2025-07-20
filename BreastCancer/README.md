@@ -30,9 +30,8 @@ This folder contains the data and R scripts used for applying the **Bayesian hie
 
 ## 📁 Files
 
-- `rnaseq_top50.csv`: Selected top 50 genes based on univariate filtering
-- `brca_model.R`: Code for running Bayesian model
-- `brca_results.pdf`: Posterior summaries and plots
+- `Gene dataset_ .R`: Code for running Bayesian model
+  
 
 ## 🔍 Notes
 
