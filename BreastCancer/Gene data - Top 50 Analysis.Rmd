@@ -1,0 +1,144 @@
+---
+title: "Top 50 Analysis"
+author: "Ayisha - TRU- T00727585"
+date: "2024-11-09"
+output: html_document
+---
+
+
+```{r}
+# Load required libraries
+library(caret)
+library(dplyr)
+library(MASS)
+library(mvtnorm)
+library(ggplot2)
+library(gridExtra)
+library(pROC)
+library(stargazer)
+library(MCMCpack)
+library(grid)
+
+```
+
+```{r}
+# Load the dataset 
+data <- read.csv("mergedData_clean.csv")  #  DSS as outcome and genes as predictors
+
+# Check for NA values and handle them by removing rows with NA values
+if (any(is.na(data))) {
+  data <- na.omit(data)
+  cat("NA values removed. Data dimensions:", dim(data), "\n")
+}
+
+# Remove zero-variance predictors
+nzv <- nearZeroVar(data, saveMetrics = TRUE)
+data <- data[, !nzv$nzv]
+cat("Data dimensions after removing zero-variance predictors:", dim(data), "\n")
+sum(is.na(data))
+
+
+# Count the number of zero variance predictors
+#num_zero_variance <- sum(nzv$zeroVar)
+
+# Print the count
+#print(num_zero_variance)
+
+```
+
+```{r}
+# Standardize gene columns (excluding DSS)
+gene_data <- data %>% dplyr::select(-DSS) %>% mutate(across(everything(), scale))
+data <- cbind(DSS = data$DSS, gene_data)
+
+```
+
+```{r}
+# Calculate p-values for each gene using logistic regression
+p_values <- data.frame(Gene = character(), PValue = numeric(), stringsAsFactors = FALSE)
+for (gene in names(data)[-1]) {
+  model <- glm(DSS ~ data[[gene]], data = data, family = binomial)
+  p_value <- summary(model)$coefficients[2, 4]  # Extract p-value
+  p_values <- rbind(p_values, data.frame(Gene = gene, PValue = p_value))
+}
+
+# Select top 50 genes based on p-value
+top_50_genes <- p_values %>% arrange(PValue) %>% slice_head(n = 50)
+write.csv(top_50_genes, "top_50_genes_by_pvalue.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+```{r}
+
+
+# Load necessary library
+library(dplyr)
+library(caret)
+
+# Create subset with DSS and top 50 genes
+top_50_gene_names <- top_50_genes$Gene
+data_subset <- data %>% dplyr::select(DSS, all_of(top_50_gene_names))
+
+# Save the full subset for reference
+write.csv(data_subset, "mergedData_top_50_genes_subset.csv", row.names = FALSE)
+
+# Split data into train (80%) and test (20%) sets
+set.seed(123)
+trainIndex <- createDataPartition(data_subset$DSS, p = 0.8, list = FALSE)
+trainData <- data_subset[trainIndex, ]
+testData <- data_subset[-trainIndex, ]
+
+# Save the datasets to CSV files
+write.csv(trainData, "training_data_tt.csv", row.names = FALSE)
+write.csv(testData, "test_data_tt.csv", row.names = FALSE)
+
+# Print dimensions of the datasets
+dim(trainData)
+dim(testData)
+
+
+```
+
+
+
+```{r}
+# Function to calculate unique counts and percentages for a specific column
+get_unique_counts_os <- function(data, column) {
+  # Calculate the counts of unique values
+  counts <- data %>%
+    group_by(!!sym(column)) %>%
+    summarise(Count = n()) %>%
+    mutate(Percentage = round((Count / nrow(data)) * 100, 2)) %>%
+    arrange(desc(Count))
+  
+  # Add the column name for reference
+  counts <- counts %>%
+    mutate(Column = column) %>%
+    dplyr::select(Column, everything())
+  
+  return(counts)
+}
+
+# Apply the function to the 'mergedData_clean$OS' column
+
+unique_counts_os_summary <- get_unique_counts_os(data_subset, "DSS")
+
+# Display the summary
+print(unique_counts_os_summary)
+```
+```{r}
+unique_counts_test_summary <- get_unique_counts_os(testData, "DSS")
+```
+
+
+
+
+
+```{r}
+unique_counts_train_summary <- get_unique_counts_os(trainData, "DSS")
+```
+
