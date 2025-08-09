@@ -1,5 +1,5 @@
 # A Data driven Bayesian hierarchical variable selection method for logistic regression and sparsity estimation
-Code and documentation for a flexible Bayesian logistic regression model using a hierarchical beta-Bernoulli prior for variable selection. Includes real-world applications on clinical and genomic data with MCMC inference.
+
 ## Abstract 
 This study proposes a flexible and data-driven hierarchical Bayesian variable selection method that simultaneously selects variables and estimates sparsity using a beta-Bernoulli prior. The results of this model are compared to those of a standard Bayesian variable selection method employing a non-hierarchical prior with a fixed selection probability. For this study, sparsity is defined as the proportion of relevant variables among all the variables in a dataset. The method is applied to two datasets: coronary artery disease (CAD) and breast cancer (BC). The proposed method yielded a smaller deviance information criterion (DIC) than the fixed-prior model, indicating improved fit to the data while penalizing for complexity.
 
