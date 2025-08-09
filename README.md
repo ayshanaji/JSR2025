@@ -8,12 +8,12 @@ The method yielded more precise (i.e., narrower) credible intervals, especially 
 
 ## Datasets used in this study
 
-1. **Coronary artery disease dataset**
-   **Source**: [UCI Machine Learning Repository – Heart Disease Dataset](https://ieee-dataport.org/open-access/heart-disease-dataset-comprehensive)
-   Description: Contains clinical and demographic variables for CAD diagnosis.
-2.  **Breast Cancer Gene Expression dataset**
-   **Source**: [TCGA Breast Cancer (BRCA) cohort via UCSC Xena](https://xenabrowser.net/datapages/?cohort=TCGA\%20Breast\%20Cancer\%20(BRCA)\&removeHub=https\%3A\%2F\%2Fxena.treehouse.gi.ucsc.edu\%3A443)
-    Description: High-dimensional gene expression profiles with DSS outcomes.
+1. **Coronary artery disease dataset**  
+   **Source**: [UCI Machine Learning Repository – Heart Disease Dataset](https://ieee-dataport.org/open-access/heart-disease-dataset-comprehensive)  
+   Description: Contains clinical and demographic variables for CAD diagnosis.  
+2.  **Breast Cancer Gene Expression dataset**  
+   **Source**: [TCGA Breast Cancer (BRCA) cohort via UCSC Xena](https://xenabrowser.net/datapages/?cohort=TCGA\%20Breast\%20Cancer\%20(BRCA)\&removeHub=https\%3A\%2F\%2Fxena.treehouse.gi.ucsc.edu\%3A443)   
+    Description: High-dimensional gene expression profiles with DSS outcomes.  
     
 ## Acknowledgment
 
