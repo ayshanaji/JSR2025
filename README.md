@@ -6,6 +6,10 @@ This study proposes a flexible and data-driven hierarchical Bayesian variable se
 
 The method yielded more precise (i.e., narrower) credible intervals, especially for the significant predictors, than the method with fixed-prior selection probability. In the low-dimensional CAD dataset, variables such as asymptomatic chest pain, male sex, elevated fasting blood sugar, exercise-induced ST depression, and high cholesterol were found to be positively associated with CAD. Conversely, upsloping or downsloping ST slope and a higher maximum heart rate were negatively associated. For the high dimensional BC dataset, the method identified 19 genes, compared to 14 selected by the model with fixed prior. Notably, SERPINA1, GSTT2, and RGS4, previously reported in cancer literature, were detected by the model, along with five newly selected genes such as PARP3, ABCG4, CCDC57, SH3GL3 and TMEM105. The estimated sparsity values for the CAD and BC datasets were 0.88 and 0.73, respectively.
 
+## Datasets used in this study
+
+1. **Coronary artery disease dataset**
+2. 
 ## Acknowledgment
 
 The authors acknowledge the funding of this project by the Natural Sciences and Engineering Research Council of Canada (NSERC) to Jabed Tomal.
