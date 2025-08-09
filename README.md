@@ -9,7 +9,9 @@ The method yielded more precise (i.e., narrower) credible intervals, especially 
 ## Datasets used in this study
 
 1. **Coronary artery disease dataset**
-2. 
+   **Source**: [UCI Machine Learning Repository – Heart Disease Dataset](https://ieee-dataport.org/open-access/heart-disease-dataset-comprehensive)
+   Description: Contains clinical and demographic variables for CAD diagnosis.
+2.  **Breast Cancer Gene Expression dataset**  
 ## Acknowledgment
 
 The authors acknowledge the funding of this project by the Natural Sciences and Engineering Research Council of Canada (NSERC) to Jabed Tomal.
