@@ -1,0 +1,814 @@
+---
+title: "CAD Preprocessing"
+author: "Ayisha - TRU- T00727585"
+date: "2024-07-17"
+output: html_document
+---
+
+
+
+
+```{r}
+
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Core packages
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(ISLR)
+
+# Statistical modeling
+library(MASS)
+library(MCMCpack)
+library(mix)
+library(stats4)
+library(Matrix)
+library(coda)
+
+# Data visualization
+library(corrplot)
+library(VIM)
+library(gridExtra)
+library(caret)
+
+# Imputation
+library(mice)
+
+# Data reshaping
+library(reshape)
+library(knitr)
+
+
+
+```
+
+
+
+
+# Read the data which is collection of heart disease dataset from 5 different hospitals or organisation from 5 different places.
+
+
+```{r}
+# Load the dataset
+heart_data <- read.csv("heart_statlog_cleveland_hungary_final.csv", 
+                       header = TRUE, stringsAsFactors = FALSE)
+
+# Rename column for clarity
+colnames(heart_data)[colnames(heart_data) == "oldpeak"] <- "STDep"
+
+# Display dataset structure
+dim(heart_data)
+names(heart_data)
+
+```
+
+```{r}
+# Count problematic values
+cholesterol_zeros <- sum(heart_data$cholesterol == 0)
+resting_bps_zeros <- sum(heart_data$resting.bp.s == 0)
+stslope_zeros <- sum(heart_data$ST.slope == 0)
+stdep_neg <- sum(heart_data$STDep < 0)
+
+# Print results
+cat("Zero cholesterol values:", cholesterol_zeros, "\n")
+cat("Zero resting BP values:", resting_bps_zeros, "\n")
+cat("Zero ST slope values:", stslope_zeros, "\n")
+cat("Negative STDep values:", stdep_neg, "\n")
+
+```
+
+Remove Rows with Invalid ST Slope or Resting BP
+```{r}
+# Remove rows with invalid ST.slope or resting blood pressure
+new_heart_data <- heart_data %>%
+  filter(ST.slope != 0, resting.bp.s != 0)
+
+# Report retained data size
+cat("Number of rows after removing zero ST.slope and resting.bp.s:", 
+    nrow(new_heart_data), "\n")
+
+```
+
+Isolate Rows with Zero Cholesterol for Further Inspection
+
+```{r}
+# Subset rows with and without zero cholesterol
+cholesterol_zero <- new_heart_data %>% filter(cholesterol == 0)
+cholesterol_non_zero <- new_heart_data %>% filter(cholesterol != 0)
+
+# Report dimensions
+cat("Cleaned dataset:", dim(new_heart_data), "\n")
+cat("Cholesterol == 0 subset:", dim(cholesterol_zero), "\n")
+cat("Cholesterol != 0 subset:", dim(cholesterol_non_zero), "\n")
+
+
+```
+
+
+
+Correlation Checks for Cholesterol Missingness
+
+```{r}
+# Select only numeric columns
+numeric_vars <- sapply(new_heart_data, is.numeric)
+
+# Compute correlation matrices
+cor_all <- cor(new_heart_data[ , numeric_vars], use = "complete.obs")
+cor_zero <- cor(cholesterol_zero[ , numeric_vars], use = "complete.obs")
+cor_non_zero <- cor(cholesterol_non_zero[ , numeric_vars], use = "complete.obs")
+
+
+```
+
+
+```{r}
+# Correlation plot for full dataset
+corrplot(cor_all, method = "color", type = "upper", tl.col = "black", 
+         title = "Correlation Matrix: All Data", mar = c(0,0,1,0))
+
+# Cholesterol == 0
+corrplot(cor_zero, method = "color", type = "upper", tl.col = "black", 
+         title = "Cholesterol == 0", mar = c(0,0,1,0))
+
+# Cholesterol != 0
+corrplot(cor_non_zero, method = "color", type = "upper", tl.col = "black", 
+         title = "Cholesterol != 0", mar = c(0,0,1,0))
+
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+# ---- NUMERICAL DISTRIBUTIONS ----
+# Use the current column name 'STDep' (not 'oldpeak')
+numerical_vars <- c("age", "resting.bp.s", "cholesterol", "max.heart.rate", "STDep")
+
+# Display labels for axes/titles
+display_labels <- c(
+  age = "Age",
+  resting.bp.s = "Resting BP",
+  cholesterol = "Cholesterol",
+  max.heart.rate = "Max HR",
+  STDep = "ST Depression"
+)
+
+# Build numerical plots (hist + density)
+num_plots <- lapply(numerical_vars, function(var) {
+  ggplot(new_heart_data, aes_string(x = var)) +
+    geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black", alpha = 0.7) +
+    geom_density(color = "blue", linewidth = 1) +
+    labs(
+      title = paste("Distribution of", display_labels[[var]]),
+      x = display_labels[[var]],
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.title = element_text(face = "bold")
+    )
+})
+
+# Save numerical distributions to PDF
+pdf("numerical_distribution_plots.pdf", width = 8.5, height = 11)
+grid.arrange(grobs = num_plots, ncol = 3, top = "Distribution of Numerical Variables")
+dev.off()
+
+
+# ---- CATEGORICAL DISTRIBUTIONS ----
+categorical_vars <- c("sex", "chest.pain.type", "fasting.blood.sugar",
+                      "resting.ecg", "exercise.angina", "ST.slope", "target")
+
+# Ensure categorical are factors for proper bar charts
+new_heart_data[categorical_vars] <- lapply(new_heart_data[categorical_vars], as.factor)
+
+cat_plots <- lapply(categorical_vars, function(var) {
+  ggplot(new_heart_data, aes_string(x = var)) +
+    geom_bar(fill = "skyblue", color = "black", alpha = 0.7) +
+    labs(
+      title = paste("Counts of", var),
+      x = var,
+      y = "Count"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.title = element_text(face = "bold")
+    )
+})
+
+# Save categorical distributions to PDF
+pdf("categorical_distribution_plots.pdf", width = 8.5, height = 11)
+grid.arrange(grobs = cat_plots, ncol = 3, top = "Distribution of Categorical Variables")
+dev.off()
+
+```
+
+
+```{r}
+# Replace zero cholesterol values with NA
+new_heart_data$cholesterol[new_heart_data$cholesterol == 0] <- NA
+
+# Confirm the number of missing values
+cat("Missing cholesterol values after replacement:", 
+    sum(is.na(new_heart_data$cholesterol)), "\n")
+
+```
+
+```{r}
+# Check dimensions after marking missing
+dim(new_heart_data)
+
+```
+
+```{r}
+# Save histogram to PDF
+pdf("cholesterol_histogram.pdf")
+
+hist(new_heart_data$cholesterol, 
+     main = "Histogram of Cholesterol Levels", 
+     xlab = "Cholesterol", 
+     ylab = "Frequency", 
+     col = "skyblue", 
+     border = "black")
+
+dev.off()
+
+cat("Cholesterol histogram saved as cholesterol_histogram.pdf\n")
+
+```
+
+
+```{r}
+# Save missing data pattern plot
+pdf("missing_data_pattern.pdf")
+
+aggr(new_heart_data, 
+     col = c('navyblue','yellow'), 
+     numbers = TRUE, 
+     sortVars = TRUE, 
+     labels = names(new_heart_data), 
+     cex.axis = 0.7, 
+     gap = 3, 
+     ylab = c("Missing Data", "Pattern"))
+
+dev.off()
+
+cat("Missing data pattern plot saved as missing_data_pattern.pdf\n")
+
+```
+
+
+```{r}
+library(ggplot2)
+
+# Variables to compare with cholesterol
+variables <- c("age", "sex", "chest.pain.type", "resting.bp.s", 
+               "fasting.blood.sugar", "resting.ecg", "max.heart.rate", 
+               "exercise.angina", "STDep", "ST.slope", "target")
+
+# Save all scatter plots to a single PDF
+pdf("cholesterol_scatter_plots.pdf")
+
+for (var in variables) {
+  p <- ggplot(new_heart_data, aes_string(x = var, y = "cholesterol")) +
+    geom_point(color = "darkblue", alpha = 0.6) +
+    theme_minimal() +
+    labs(
+      title = paste("Cholesterol vs", var),
+      x = var,
+      y = "Cholesterol"
+    )
+  print(p)
+}
+
+dev.off()
+
+cat("Scatter plots saved to cholesterol_scatter_plots.pdf\n")
+
+```
+
+The wide overlap suggests that cholesterol is partially informative for predicting heart disease but needs to be considered with other predictors.
+
+The similarity between groups means that cholesterol’s missingness is likely MAR (Missing At Random) — useful for Bayesian imputation.
+
+
+```{r}
+library(mice)
+
+# Set imputation method for cholesterol only
+methods <- c(cholesterol = "norm")
+
+# Set random seed for reproducibility
+set.seed(1)
+
+# Number of multiple imputations
+D <- 5
+
+# Apply MICE on the dataset
+imputed_data <- mice(new_heart_data, 
+                     m = D, 
+                     method = methods, 
+                     maxit = 20)
+
+# Extract one completed dataset
+completed_data <- complete(imputed_data, 1)
+
+# Round numeric values to 2 decimal places
+completed_heart_data <- as.data.frame(lapply(completed_data, function(x) {
+  if (is.numeric(x)) round(x, 2) else x
+}))
+
+# Save the completed dataset
+write.csv(completed_heart_data, "completed_heartdata.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+library(dplyr)
+library(knitr)
+
+chol_summary <- bind_rows(
+  new_heart_data %>% 
+    summarise(
+      Source   = "Observed (pre-imputation)",
+      N        = sum(!is.na(cholesterol)),
+      Missing  = sum(is.na(cholesterol)),
+      Mean     = mean(cholesterol, na.rm = TRUE),
+      SD       = sd(cholesterol, na.rm = TRUE),
+      Median   = median(cholesterol, na.rm = TRUE),
+      Min      = min(cholesterol, na.rm = TRUE),
+      Max      = max(cholesterol, na.rm = TRUE)
+    ),
+  completed_heart_data %>% 
+    summarise(
+      Source   = "Completed (post-imputation)",
+      N        = n(),
+      Missing  = sum(is.na(cholesterol)),
+      Mean     = mean(cholesterol),
+      SD       = sd(cholesterol),
+      Median   = median(cholesterol),
+      Min      = min(cholesterol),
+      Max      = max(cholesterol)
+    )
+)
+
+kable(chol_summary, digits = 2, caption = "Cholesterol: Observed vs Completed (Post-Imputation)")
+
+```
+
+
+```{r}
+library(ggplot2)
+
+# long format for plotting
+dist_df <- dplyr::bind_rows(
+  new_heart_data %>%
+    dplyr::filter(!is.na(cholesterol)) %>%
+    dplyr::transmute(cholesterol, Source = "Observed"),
+  completed_heart_data %>%
+    dplyr::transmute(cholesterol, Source = "Imputed")
+)
+
+p_hist <- ggplot(dist_df, aes(x = cholesterol)) +
+  geom_histogram(binwidth = 10, boundary = 0, closed = "left") +
+  facet_wrap(~ Source, ncol = 2, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Cholesterol Distribution: Observed vs Imputed",
+       x = "Cholesterol", y = "Count")
+
+print(p_hist)
+
+# Save to PDF
+pdf("cholesterol_histograms.pdf", width = 10, height = 6)
+print(p_hist)
+dev.off()
+
+```
+
+
+```{r}
+p_dens <- ggplot(dist_df, aes(x = cholesterol, linetype = Source)) +
+  geom_density(adjust = 1.0, linewidth = 1) +
+  scale_linetype_manual(values = c("Observed" = 1, "Imputed" = 2)) +
+  theme_minimal() +
+  labs(title = "Cholesterol Density: Observed (solid) vs Imputed (dashed)",
+       x = "Cholesterol", y = "Density")
+
+print(p_dens)
+
+# Save to PDF
+pdf("cholesterol_density_overlay.pdf", width = 10, height = 6)
+print(p_dens)
+dev.off()
+
+```
+
+
+```{r}
+library(mice)
+
+# On-screen diagnostic (observed vs imputed within MICE)
+densityplot(imputed_data, ~ cholesterol, 
+            plot.points = FALSE, lwd = 1.4)
+
+# Save to PDF
+pdf("mice_density_cholesterol.pdf", width = 8, height = 6)
+densityplot(imputed_data, ~ cholesterol, 
+            plot.points = FALSE, lwd = 1.4)
+dev.off()
+
+```
+
+```{r}
+delta_stats <- chol_summary %>%
+ dplyr::select(Source, Mean, SD, Median, Min, Max)
+
+kable(delta_stats, digits = 2, caption = "Key Moments: Observed vs Imputed")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(mice)
+
+# Open PDF device
+pdf("density_plot.png", width = 8, height = 8)
+
+# Density plot in grayscale with readable axis labels
+densityplot(imputed_data,
+            plot.points = FALSE,
+            lwd = 1.5,
+            col = rep("black", 5),
+            lty = c(1, 2, 3, 4, 5, 6),
+            par.settings = list(
+              axis.text = list(cex = 1.4, font = 2),      # Axis number size
+              par.xlab.text = list(cex = 1.6, font = 2),  # X-axis label size
+              par.ylab.text = list(cex = 1.6, font = 2),  # Y-axis label size
+              par.main.text = list(cex = 1.6)   # Title size (optional)
+            )
+)
+
+# Close PDF device
+dev.off()
+
+```
+
+```{r}
+# Open a PDF device
+pdf("plot.pdf", height = 10)
+
+# Generate the plot
+plot(imputed_data)
+
+
+
+
+# Close the PDF device
+dev.off()
+
+```
+
+
+
+
+
+```{r}
+# Open a PDF device
+pdf("plot_grayscale.pdf", height = 10)
+
+# Custom plot with grayscale: solid black for 1st, then grey, dashed, dotted, etc.
+plot(imputed_data,
+     col = rep("black", 5),                  # All black/gray lines
+     lty = c(1, 2, 3, 4, 5),                 # Vary line types
+     lwd = 1.5                               # Optional: slightly thicker lines
+)
+
+# Close the PDF device
+dev.off()
+
+```
+
+
+
+
+
+```{r}
+completed_heart_data <- read.csv("completed_heartdata.csv", header = TRUE, stringsAsFactors = FALSE)
+
+# 2. Clean the Data: Check for NA values
+na_count <- sum(is.na(completed_heart_data))
+cat("Total NA values in the dataset:", na_count, "\n")
+```
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(gridExtra)
+
+# Ensure target and sex are factors
+completed_heart_data$target <- factor(completed_heart_data$target, labels = c(0, 1))
+
+# Define colors for clarity
+colors <- c("black", "grey")
+
+# Create a custom theme for larger, bold labels and legend
+custom_theme <- theme(
+  axis.title = element_text(size = 14, face = "bold"),
+  axis.text = element_text(size = 12, face = "bold"),
+  legend.title = element_text(size = 14, face = "bold"),
+  legend.text = element_text(size = 12, face = "bold")
+)
+
+# Create box plots for each numerical variable grouped by target and sex with custom labels
+plot_restingbp <- ggplot(completed_heart_data, aes(x = factor(sex), y = resting.bp.s, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Female", "1" = "Male")) +  # Change labels to "Female" and "Male"
+  labs(x = "Sex", y = "Resting BP") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the target legend
+
+plot_cholesterol <- ggplot(completed_heart_data, aes(x = factor(sex), y = cholesterol, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Female", "1" = "Male")) +  # Change labels to "Female" and "Male"
+  labs(x = "Sex", y = "Cholesterol") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the target legend
+
+plot_maxhr <- ggplot(completed_heart_data, aes(x = factor(sex), y = max.heart.rate, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Female", "1" = "Male")) +  # Change labels to "Female" and "Male"
+  labs(x = "Sex", y = "Max HR") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the target legend
+
+plot_age <- ggplot(completed_heart_data, aes(x = factor(sex), y = age, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Female", "1" = "Male")) +  # Change labels to "Female" and "Male"
+  labs(x = "Sex", y = "Age") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the target legend
+
+plot_STDep <- ggplot(completed_heart_data, aes(x = factor(sex), y = STDep, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Female", "1" = "Male")) +  # Change labels to "Female" and "Male"
+  labs(x = "Sex", y = "STDep") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the target legend
+
+# Save plots to a PDF
+pdf("Sex_box_plots.pdf", height = 11, width = 8.5)
+grid.arrange(plot_restingbp, plot_cholesterol, plot_maxhr, plot_age, plot_STDep, ncol = 3)
+dev.off()
+```
+
+
+
+```{r}
+# Categorize age: <50 as 0, >=50 as 1  (same as your code)
+completed_heart_data <- completed_heart_data %>%
+  dplyr::mutate(
+    Age_group = ifelse(age >= 50, 1, 0)
+  )
+
+# sanity check
+table(completed_heart_data$Age_group, useNA = "ifany")
+```
+
+
+
+
+
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(gridExtra)
+
+# Define colors for clarity
+colors <- c("black", "grey")
+
+# Define a custom theme for larger, bold labels, legend, and rotated x-axis text
+custom_theme <- theme(
+  axis.title = element_text(size = 14, face = "bold"),      # Bold and larger font for axis titles
+  axis.text = element_text(size = 12, face = "bold"),       # Bold and larger font for axis tick labels
+  legend.title = element_text(size = 14, face = "bold"),    # Bold and larger font for legend title
+  legend.text = element_text(size = 12, face = "bold"),     # Bold and larger font for legend text
+  axis.text.x = element_text(angle = 45, hjust = 1)         # Rotate x-axis text for better readability
+)
+
+# Create box plots for each numerical variable grouped by target and age_group with custom labels
+plot_restingbp <- ggplot(completed_heart_data, aes(x = factor(Age_group), y = resting.bp.s, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Below 50", "1" = "50 and above")) +
+  labs(x = "Age group", y = "Resting BP") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the legend
+
+plot_cholesterol <- ggplot(completed_heart_data, aes(x = factor(Age_group), y = cholesterol, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Below 50", "1" = "50 and above")) +
+  labs(x = "Age group", y = "Cholesterol") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the legend
+
+plot_maxhr <- ggplot(completed_heart_data, aes(x = factor(Age_group), y = max.heart.rate, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Below 50", "1" = "50 and above")) +
+  labs(x = "Age group", y = "Max HR") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the legend
+
+plot_STDep <- ggplot(completed_heart_data, aes(x = factor(Age_group), y = STDep, fill = target)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = c("0" = "Below 50", "1" = "50 and above")) +
+  labs(x = "Age group", y = "STDep") +
+  scale_fill_manual(values = colors) +
+  custom_theme +
+  theme(legend.position = "none")  # Remove the legend
+
+# Save plots to a PDF
+pdf("age_group_box_plots.pdf", height = 11, width = 8.5)
+grid.arrange(plot_restingbp, plot_cholesterol, plot_maxhr, plot_STDep, ncol = 2)
+dev.off()
+```
+
+
+```{r}
+# Convert categorical variables to factors and set reference levels
+chestpain<-completed_heart_data$chest.pain.type
+Sex<-completed_heart_data$sex
+age_group<-completed_heart_data$Age_group
+Fasting_blood_sugar<-completed_heart_data$fasting.blood.sugar
+Resting_Ecg<-completed_heart_data$resting.ecg 
+Exercise_angina<-completed_heart_data$exercise.angina 
+ST_slope<-completed_heart_data$ST.slope
+
+# Convert and set reference levels
+Sex<- as.factor(completed_heart_data$sex)  # 0 = female
+age_group<- as.factor(completed_heart_data$Age_group)  #  0 = lessthan 50
+chestpain<- as.factor(completed_heart_data$chest.pain.type) # 1:typical Angina
+Fasting_blood_sugar<- as.factor(completed_heart_data$fasting.blood.sugar) # 0 = false
+Resting_Ecg<- as.factor(completed_heart_data$resting.ecg) # 0 =normal
+Exercise_angina<- as.factor(completed_heart_data$exercise.angina)  # 0 = no
+ST_slope <- relevel(as.factor(completed_heart_data$ST.slope), ref = "2")
+target <- factor(completed_heart_data$target, labels = c(0, 1))
+
+
+# Load necessary library
+library(dplyr)
+final_heart_data_numeric<- completed_heart_data %>%
+  dplyr::select(-target)
+
+# Select only numeric columns for standardization
+numeric_vars <- dplyr::select_if(final_heart_data_numeric, is.numeric)
+
+# Standardize the numeric variables
+standardized_numeric_vars <- as.data.frame(scale(numeric_vars))
+
+# Keep ONLY the intended 5 scaled predictors (order fixed)
+new_heart_data_standardized <- standardized_numeric_vars %>%
+  dplyr::select(resting.bp.s, cholesterol, max.heart.rate, exercise.angina, STDep)
+
+# Checking the first few rows of the standardized dataset
+head(new_heart_data_standardized)
+names(new_heart_data_standardized)
+
+```
+
+
+
+
+```{r}
+# Build dummy matrices (drop intercept to avoid duplicate baseline)
+chest_pain_matrix  <- model.matrix(~ chestpain,     data = data.frame(chestpain))[, -1, drop = FALSE]
+resting_ecg_matrix <- model.matrix(~ Resting_Ecg,   data = data.frame(Resting_Ecg))[, -1, drop = FALSE]
+st_slope_matrix    <- model.matrix(~ ST_slope,      data = data.frame(ST_slope))[, -1, drop = FALSE]
+
+# Bind all pieces together in your final structure
+final_heart_data <- cbind(
+  new_heart_data_standardized,
+  chest_pain_matrix, 
+  resting_ecg_matrix, 
+  st_slope_matrix,
+  Sex, 
+  age_group, 
+  Fasting_blood_sugar, 
+  target
+)
+
+# Quick checks
+str(final_heart_data)
+sum(is.na(final_heart_data))
+
+```
+
+
+```{r}
+# Rename columns to your final names and order
+colnames(final_heart_data) <- c(
+  "Resting_BP", "Cholesterol", "Max_HR", "EA", "STDep", 
+  "CP2", "CP3", "CP4", 
+  "RECG1", "RECG2", 
+  "STSlope1", "STSlope3", 
+  "Sex", "Age_group", "FBS", "CAD"
+)
+# Verify
+colnames(final_heart_data)
+dim(final_heart_data)
+# Persist
+write.csv(final_heart_data, "final_heart_data.csv", row.names = FALSE)
+
+```
+
+```{r}
+set.seed(1)
+final_heart_data <- read.csv("final_heart_data.csv")
+
+# Stratified split on outcome (80/20)
+trainIndex <- caret::createDataPartition(final_heart_data$CAD, p = 0.80, list = FALSE)
+trainData  <- final_heart_data[trainIndex, ]
+testData   <- final_heart_data[-trainIndex, ]
+
+# Save splits
+write.csv(trainData, "training_data_tt.csv", row.names = FALSE)
+write.csv(testData,  "test_data_tt.csv",    row.names = FALSE)
+
+# Dimensions
+cat("Training Data: ", paste(dim(trainData), collapse = " x "), "\n")
+cat("Test Data: ",     paste(dim(testData),  collapse = " x "), "\n")
+
+```
+
+
+```{r}
+names(trainData)
+```
+
+```{r}
+# Utility: counts + percentages by column
+get_unique_counts_and_percentages <- function(data) {
+  lapply(names(data), function(col_name) {
+    counts <- table(data[[col_name]])
+    percentages <- prop.table(counts) * 100
+    data.frame(
+      Column = col_name,
+      Value = names(counts),
+      Count = as.vector(counts),
+      Percentage = round(as.vector(percentages), 2)
+    )
+  }) |> setNames(names(data))
+}
+
+# Compute and print
+unique_counts_completed <- get_unique_counts_and_percentages(final_heart_data)
+unique_counts_train     <- get_unique_counts_and_percentages(trainData)
+unique_counts_test      <- get_unique_counts_and_percentages(testData)
+
+print_unique_counts_and_percentages <- function(unique_counts) {
+  for (nm in names(unique_counts)) {
+    cat("\nUnique counts and percentages for column:", nm, "\n")
+    print(unique_counts[[nm]])
+  }
+}
+
+cat("Completed Data:\n")
+print_unique_counts_and_percentages(unique_counts_completed)
+cat("\nTrain Data:\n")
+print_unique_counts_and_percentages(unique_counts_train)
+cat("\nTest Data:\n")
+print_unique_counts_and_percentages(unique_counts_test)
+
+```
+
+## End of CAD preprocessing 
