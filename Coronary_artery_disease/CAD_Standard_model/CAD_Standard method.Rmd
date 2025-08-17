@@ -1,0 +1,791 @@
+---
+title: "CAD Standard model"
+author: "Ayisha - TRU- T00727585"
+date: "2024-06-27"
+output: html_document
+---
+
+
+
+
+
+```{r}
+
+
+# ─────────────────────────────────────────────
+# 📌 SECTION: Load Required Libraries
+# Description:
+# This block loads all the R packages needed for:
+# - Bayesian analysis
+# - Data manipulation
+# - Plotting and reporting
+# - MCMC diagnostics
+# ─────────────────────────────────────────────
+
+# Global options for knitr
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Core statistical packages
+library(ISLR)        # Datasets and examples
+library(stats4)      # Statistical modeling
+library(MASS)        # Statistical functions and distributions
+library(Matrix)      # Efficient matrix computations
+library(mvtnorm)     # Multivariate normal sampling
+
+# Data manipulation
+library(dplyr)       # pspe-friendly data manipulation
+library(tidyr)       # Data tidying
+library(readr)       # Fast CSV reading
+
+# MCMC sampling and diagnostics
+library(MCMCpack)    # MCMC sampling tools
+library(coda)        # MCMC diagnostics
+
+# Visualization
+library(ggplot2)     # Grammar of graphics
+library(gridExtra)   # Arrange multiple plots
+library(grid)        # Grid graphics system
+
+# Model reporting
+library(stargazer)   # Export regression tables
+
+# Evaluation
+library(pROC)        # ROC curves and AUC
+library(caret)       # Model evaluation (confusion matrix, etc.)
+
+# (Deprecated) Reshaping – used in legacy parts of script
+library(reshape)     
+```
+
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Load Data & Define Logistic Likelihood
+# Description:
+# - Read training and testing datasets from CSV
+# - Build design matrices (X, y)
+# - Define the custom log-likelihood function for logistic regression
+# ─────────────────────────────────────────────
+
+# Load datasets
+trainData <- read.csv("training_data_tt.csv", header = TRUE, stringsAsFactors = FALSE)
+testData  <- read.csv("test_data_tt.csv", header = TRUE, stringsAsFactors = FALSE)
+
+# Define custom logistic log-likelihood function
+flogis.log <- function(beta, zlv, X, y) {
+  p <- plogis(X %*% (beta * zlv))  # Logistic transformation
+  sum(ifelse(y, log(p), log(1 - p)))  # Bernoulli log-likelihood
+}
+
+# Prepare response and design matrices
+y_train <- trainData[, "CAD"]
+X_train <- model.matrix(CAD ~ ., data = trainData)
+
+y_test <- testData[, "CAD"]
+X_test <- model.matrix(CAD ~ ., data = testData)
+
+# Store matrix dimensions
+k <- ncol(X_train)  # Number of predictors including intercept 
+n <- nrow(X_train)  # Number of observations
+
+```
+
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Frequentist Initialization & Prior Setup
+# Description:
+# - Fit logistic regression to training data
+# - Extract coefficients and variance-covariance matrix
+# - Use as prior mean and prior covariance for Bayesian sampling
+# ─────────────────────────────────────────────
+
+# Step 1: Fit frequentist logistic regression
+reg.glm <- glm(CAD ~ ., data = trainData, family = binomial)
+
+# Step 2: Extract point estimates (MLE) and variance-covariance matrix
+BETA_init   <- as.vector(reg.glm$coef)   # Initial beta estimates (prior mean)
+vcov_matrix <- vcov(reg.glm)             # Prior covariance (posterior curvature)
+# Step 3: Set prior mean and prior covariance for beta
+pmn.beta <- BETA_init     # Prior mean for β
+psd.beta <- vcov_matrix   # Prior standard deviation (covariance)
+
+# ─────────────────────────────────────────────
+# SECTION: MCMC Sampling Initialization
+# Description:
+# - Set MCMC sample size and initialize storage matrices
+# ─────────────────────────────────────────────
+
+S <- 140000                    # Total MCMC iterations
+k <- length(BETA_init)        # Number of predictors
+zlv <- rep(1, k)              # Initial inclusion vector (all variables included)
+beta <- reg.glm$coef
+# Track acceptance
+acsb <- 0                     # Accepted beta proposals
+acsg <- 0                     # Accepted zlv flips
+accept_beta <- rep(0, k)      # Per-variable beta acceptance tracker
+accept_zlv  <- rep(0, k)  # Per-variable zlv acceptance tracker (excluding intercept)
+
+# Allocate storage for MCMC samples
+BETA <- matrix(0, nrow = S, ncol = k)
+ZLV  <- matrix(0, nrow = S, ncol = k)
+
+# Proposal variance scaling factor (to be tuned later)
+c <- 1
+
+# For tuning short chain
+short_chain_length <- 1000
+
+```
+
+```{r}
+# Verify dimensions before starting MCMC tuning
+cat("Checking dimensions...\n")
+
+# beta vector (initial estimate)
+cat("Length of beta: ", length(beta), "\n")
+
+# vcov_matrix should be square matrix (k x k)
+cat("Dimensions of vcov_matrix: ", dim(vcov_matrix), "\n")
+
+# var.prop must be same as vcov_matrix (after scaling by c)
+var.prop <- c * vcov_matrix
+cat("Dimensions of var.prop: ", dim(var.prop), "\n")
+
+# BETA_init should also be same length as beta
+cat("Length of BETA_init: ", length(BETA_init), "\n")
+```
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Tune Proposal Variance (Scaling Factor c)
+# Description:
+# - Short-run Metropolis-Hastings updates for β
+# - Tune the proposal scaling constant `c` for efficiency
+# ─────────────────────────────────────────────
+
+# Track acceptance rate
+set.seed(1)  # For reproducibility
+
+start_time <- Sys.time()
+var.prop <- c * vcov_matrix
+for (i in 1:10) {  # Adjust the proposal variance over 10 iterations of tuning
+  acs <- 0  # Acceptance count
+  
+  for (s in 1:short_chain_length) {
+    # Propose a new beta using current variance scale (c * vcov_matrix)
+    beta.p <- t(rmvnorm(1, beta, c * vcov_matrix))
+    
+    # Calculate log acceptance ratio (log-hastings ratio)
+    lhr <- flogis.log(beta.p, zlv, X_train, y_train) - flogis.log(beta, zlv, X_train, y_train) +
+           dmvnorm(t(beta.p), BETA_init, vcov_matrix, log = TRUE) -
+           dmvnorm(t(beta), BETA_init, vcov_matrix, log = TRUE)
+    
+    # Accept or reject based on acceptance ratio
+    if (log(runif(1)) < lhr) {
+      beta <- beta.p
+      acs <- acs + 1
+    }
+  }
+  
+  # Calculate acceptance rate
+  acceptance_rate <- acs / short_chain_length
+  print(paste("Iteration", i, "- Acceptance rate:", acceptance_rate))
+  
+  # Adjust `c` based on acceptance rate
+  if (acceptance_rate < 0.2) {
+    c <- c / 2  # Reduce `c` if acceptance rate is too low
+  } else if (acceptance_rate > 0.5) {
+    c <- c * 2  # Increase `c` if acceptance rate is too high
+  }
+  
+  # Print adjusted `c` value for tracking
+  print(paste("Adjusted proposal variance scaling factor (c):", c))
+}
+
+# After tuning, `c` can be used in the main MCMC chain
+print(paste("Final proposal variance scaling factor (c):", c))
+```
+
+
+
+
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Full MCMC Sampling (β and Z)
+# Description:
+# - Metropolis-Hastings step for β
+# - Gibbs-style sampling for Z (selection vector)
+# - Save posterior draws in BETA and ZLV matrices
+# ─────────────────────────────────────────────
+
+set.seed(1)  # Reproducibility
+
+# Use tuned proposal variance from earlier chunk
+var.prop <- c * vcov_matrix  
+
+# Main MCMC loop
+for (s in 1:S) {
+  
+  # ── Step 1: Propose new β (Metropolis-Hastings) ──
+  beta.p <- t(rmvnorm(1, beta, var.prop))
+  
+  # Log-Hastings ratio for β
+  lhr <- flogis.log(beta.p, zlv, X_train, y_train) - flogis.log(beta, zlv, X_train, y_train) +
+         dmvnorm(t(beta.p), pmn.beta, psd.beta, log = TRUE) -
+         dmvnorm(t(beta), pmn.beta, psd.beta, log = TRUE)
+  
+  # Accept/reject β proposal
+  if (log(runif(1)) < lhr) {
+    accept_beta <- accept_beta + (beta.p != beta)
+    beta <- beta.p
+    acsb <- acsb + 1
+  }
+  
+  # Save β draw
+  BETA[s, ] <- beta
+  
+  
+  # ── Step 2: Update zlv (variable inclusion) ──
+  for (j in 1:k) {
+    zlv.p <- zlv
+    zlv.p[j] <- 1 - zlv.p[j]  # Flip j-th indicator
+    
+    # Log-Hastings ratio for zlv flip
+    lhg <- flogis.log(pmn.beta, zlv.p, X_train, y_train) - 
+           flogis.log(pmn.beta, zlv, X_train, y_train) +
+           sum(dbinom(zlv.p[1:k], 1, 0.5, log = TRUE)) -
+           sum(dbinom(zlv[1:k], 1, 0.5, log = TRUE))
+    
+    # Accept/reject zlv flip
+    if (log(runif(1)) < lhg) {
+      zlv[j] <- zlv.p[j]
+      acsg <- acsg + 1
+      if (j > 1) accept_zlv[j] <- accept_zlv[j] + 1
+    }
+  }
+  
+  # Save zlv draw
+  ZLV[s, ] <- zlv
+}
+
+end_time <- Sys.time()
+
+# Track elapsed time
+print(paste("Total computing time for fixed model:", round(end_time - start_time, 2)))
+
+```
+
+
+```{r}
+# Acceptance rates
+acceptance_rate_beta <- acsb / S
+acceptance_rate_zlv  <- acsg / (S * (ncol(X_train)))  # overall mean flip acceptance
+
+cat(sprintf("Acceptance rate (beta): %.3f\n", acceptance_rate_beta))
+cat(sprintf("Acceptance rate (zlv overall): %.3f\n", acceptance_rate_zlv))
+```
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Save & Reload Posterior Samples
+# Description:
+# - Save BETA and ZLV matrices as .RData
+# - Reload from file when needed
+# ─────────────────────────────────────────────
+
+# Save posterior samples to RData file
+save(BETA, ZLV, file = "results_Fixedmodel.RData")
+
+# Reload saved results (optional step, use when skipping recomputation)
+#load("results_Fixedmodel.RData")
+```
+
+
+
+```{r}
+# Keep original variable names (from model matrix)
+variable_names <- colnames(X_train)
+
+# Create mapping: raw → pretty
+pretty_labels <- c(
+  "(Intercept)" = "Intercept",
+  "MHR"        = "Max HR",
+  "RBPS"       = "Resting BP",
+  "Chol"       = "Cholesterol",
+  "AgeGrp"     = "Age group"
+)
+
+# For variables not explicitly listed, default back to original
+pretty_labels <- ifelse(variable_names %in% names(pretty_labels),
+                        pretty_labels[variable_names],
+                        variable_names)
+
+# usage in plots/tables:
+colnames(BETA) <- variable_names   # keep original names in the matrices
+colnames(ZLV)  <- variable_names
+
+# When making a dataframe for display:
+ess_summary <- data.frame(
+  Parameter = pretty_labels,    # Use pretty labels instead of raw names
+  ESS_Beta  = round(effectiveSize(as.mcmc(BETA)), 2),
+  ESS_Z     = round(effectiveSize(as.mcmc(ZLV)), 2)
+)
+
+# When plotting with ggplot, replace axis labels
+ggplot(ess_summary, aes(x = Parameter, y = ESS_Beta)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Effective Sample Size", x = "Predictors", y = "ESS") +
+  theme_minimal()
+
+```
+
+
+
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Burn-in, Thinning & Diagnostics
+# Description:
+# - Remove initial burn-in
+# - Apply thinning to reduce autocorrelation
+# - Recompute Effective Sample Size (ESS) post-thinning
+# - Generate trace, density, and ACF plots (post-thinning only)
+# ─────────────────────────────────────────────
+
+# 1) Burn-in and thinning
+burn_in       <- 20000       # discard first 20,000 iterations
+thin_interval <- 60          # keep every 60th draw
+
+BETA_thinned <- BETA[-seq_len(burn_in), , drop = FALSE]
+ZLV_thinned  <- ZLV[-seq_len(burn_in),  , drop = FALSE]
+
+BETA_thinned <- BETA_thinned[seq(1, nrow(BETA_thinned), by = thin_interval), , drop = FALSE]
+ZLV_thinned  <- ZLV_thinned[seq(1, nrow(ZLV_thinned),  by = thin_interval),  , drop = FALSE]
+
+# 2) ESS after thinning
+ess_beta <- effectiveSize(as.mcmc(BETA_thinned))
+ess_zlv  <- effectiveSize(as.mcmc(ZLV_thinned))
+
+ess_summary <- data.frame(
+  Parameter = pretty_labels,    # use human-readable names
+  ESS_Beta  = round(ess_beta, 2),
+  ESS_Z     = round(ess_zlv,  2)
+)
+print(ess_summary)
+
+# Save as PDF table
+pdf("ESS_Summary_PostThinning_Fixed.pdf", width = 8, height = 5)
+grid.table(ess_summary, rows = NULL)
+dev.off()
+
+# 3) Diagnostics plots (post-thinning only)
+BETA_ZLV_thinned <- BETA_thinned * ZLV_thinned
+
+# Trace + Density plots
+plot_trace_density_to_pdf <- function(param_matrix, param_names, file_name) {
+  pdf(file_name, width = 8, height = 11)
+  ncol_param <- ncol(param_matrix)
+  for (i in seq_len(ncol_param)) {
+    par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+    plot(param_matrix[, i], type = "l",
+         main = paste("Trace:", param_names[i]),
+         xlab = "Iteration (thinned)", ylab = "Value")
+    plot(density(param_matrix[, i]),
+         main = paste("Density:", param_names[i]),
+         xlab = "Value", ylab = "Density")
+  }
+  dev.off()
+}
+
+# ACF plots
+plot_acf_to_pdf <- function(param_matrix, param_names, file_name) {
+  pdf(file_name, width = 8, height = 11)
+  ncol_param <- ncol(param_matrix)
+  par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+  for (i in seq_len(ncol_param)) {
+    acf(param_matrix[, i], main = paste("ACF:", param_names[i]), xlab = "Lag", ylab = "ACF")
+  }
+  dev.off()
+}
+
+# Run diagnostics
+plot_trace_density_to_pdf(BETA_thinned, pretty_labels, "TraceDensity_Beta_PostThinning_Fixed.pdf")
+plot_trace_density_to_pdf(BETA_ZLV_thinned, pretty_labels, "TraceDensity_BetaZ_PostThinning_Fixed.pdf")
+plot_acf_to_pdf(BETA_thinned, pretty_labels, "ACF_Beta_PostThinning_Fixed.pdf")
+plot_acf_to_pdf(BETA_ZLV_thinned, pretty_labels, "ACF_BetaZ_PostThinning_Fixed.pdf")
+
+```
+
+
+```{r}
+# ─────────────────────────────────────────────
+# 📌 SECTION: Posterior Model Probabilities (Top-5 Models)
+# Description:
+# - Each unique ZLV pattern represents a distinct model
+# - Count model frequencies across MCMC draws
+# - Report the Top-5 models with highest posterior probability
+# - Output as a bar plot + PDF table
+# ─────────────────────────────────────────────
+
+# Convert ZLV_thinned into model strings
+ZLV_list <- as.list(as.data.frame(ZLV_thinned))
+model_patterns <- do.call(paste0, ZLV_list)
+
+# Tabulate model frequencies
+model_counts <- table(model_patterns)
+top5_models <- sort(model_counts, decreasing = TRUE)[1:5]
+top5_probabilities <- top5_models / sum(model_counts)
+
+# Build summary dataframe
+top5_df <- data.frame(
+  Model       = paste0("Model ", 1:5),
+  Probability = round(as.numeric(top5_probabilities), 3),
+  Variables   = names(top5_probabilities),
+  stringsAsFactors = FALSE
+)
+
+# Print to console
+print(top5_df)
+
+# ── Plot posterior probabilities of Top-5 Models ──
+plot_top5 <- ggplot(top5_df, aes(x = Model, y = Probability)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = round(Probability, 3)), vjust = -0.5, size = 3.5) +
+  labs(title = "Posterior Probabilities of Top-5 Models (Fixed Prior)",
+       x = "Model", y = "Posterior Probability") +
+  theme_minimal(base_size = 12)
+
+ggsave("Posterior_Probabilities_Top5Models_Fixed.pdf", plot = plot_top5, width = 8, height = 5)
+
+# ── Table of Top-5 Models ──
+pdf("Top5_Models_Table_Fixed.pdf", width = 8, height = 6)
+grid.table(top5_df, rows = NULL)
+dev.off()
+
+```
+
+
+
+
+```{r}
+# ─────────────────────────────────────────────
+# Credible Intervals & Posterior Selection Probabilities (PSP)
+# Two exports:
+#   1) Paper (black/gray)      → "CI_PSP_Paper_Fixed.pdf"
+#   2) Presentation (red/blue) → "CI_PSP_Presentation_Fixed.pdf"
+# Notes:
+#   - Intercept is EXCLUDED from CI and PSP plots.
+#   - Order: HIGH → LOW PSP with highest at the TOP.
+#   - Side-by-side layout uses 65% (CI) and 35% (PSP).
+#   - We use the term PSP everywhere (no PIP).
+# ─────────────────────────────────────────────
+
+library(ggplot2)
+library(gridExtra)
+
+# Pretty labels (presentation only; does not rename matrices)
+if (!exists("pretty_name")) {
+  pretty_labels_map <- c(
+   
+    "max_hr"      = "Max HR",
+    "resting_bp"  = "Resting BP",
+    "age_group"   = "Age group"
+  )
+  pretty_name <- function(x, map = pretty_labels_map) {
+    out <- as.character(x)
+    hits <- names(map)
+    to_replace <- x %in% hits
+    out[to_replace] <- map[x[to_replace]]
+    out
+  }
+}
+
+# Helper to compute 2.5%, 50%, 97.5% quantiles per column
+calculate_quantiles <- function(mat, probs = c(0.025, 0.5, 0.975)) {
+  apply(mat, 2, quantile, probs = probs)
+}
+
+# Effective coefficients and summaries
+BETA_ZLV_thinned <- BETA_thinned * ZLV_thinned
+beta_q  <- calculate_quantiles(BETA_ZLV_thinned)
+beta_df <- as.data.frame(t(beta_q))
+beta_df$Variable <- rownames(beta_df)
+colnames(beta_df)[1:3] <- c("Lower","Median","Upper")
+
+# PSP (Posterior Selection Probability)
+psp     <- colMeans(ZLV_thinned)
+psp_df  <- data.frame(Variable = names(psp), PSP = as.numeric(psp), row.names = NULL)
+
+# Merge, mark significance by 95% CI, drop intercept
+combined <- merge(beta_df, psp_df, by = "Variable", all.x = TRUE)
+combined$Significance <- ifelse(combined$Lower < 0 & combined$Upper > 0, "Not significant", "Significant")
+combined <- combined[combined$Variable != "(Intercept)", , drop = FALSE]
+
+# Order from HIGH to LOW PSP and make labels
+combined <- combined[order(-combined$PSP), ]
+combined$Label <- pretty_name(combined$Variable)
+
+# IMPORTANT: reverse factor levels so the highest PSP appears at the TOP after coord_flip()
+combined$Label <- factor(combined$Label, levels = rev(combined$Label))
+
+# ── STYLE 1: PAPER (black/gray) ──────────────────────────────
+p_ci_paper <- ggplot(combined, aes(x = Label, y = Median)) +
+  geom_point(size = 2.8, aes(color = Significance)) +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper, color = Significance), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("Significant" = "black", "Not significant" = "gray")) +
+  coord_flip() +
+  labs(title = "Credible intervals", x = NULL, y = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+
+p_psp_paper <- ggplot(combined, aes(x = Label, y = PSP, fill = Significance)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_fill_manual(values = c("Significant" = "black", "Not significant" = "gray")) +
+  coord_flip() +
+  labs(title = "Posterior selection probability", x = NULL, y = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none",
+        axis.text.y = element_blank())
+
+pdf("CI_PSP_Paper_Fixed.pdf", width = 12, height = 7)
+grid.arrange(p_ci_paper, p_psp_paper, ncol = 2, widths = c(0.65, 0.35))
+dev.off()
+
+# ── STYLE 2: PRESENTATION (red dots + blue intervals/bars) ──
+p_ci_pres <- ggplot(combined, aes(x = Label, y = Median)) +
+  geom_point(size = 3.2, aes(color = Significance)) +                           # red/gray dots
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.25, color = "steelblue") +  # blue CI
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("Significant" = "red", "Not significant" = "gray")) +
+  coord_flip() +
+  labs(title = "Credible intervals", x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+
+p_psp_pres <- ggplot(combined, aes(x = Label, y = PSP)) +
+  geom_bar(stat = "identity", width = 0.8, fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Posterior selection probability", x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.y = element_blank())
+
+pdf("CI_PSP_Presentation_Fixed.pdf", width = 12, height = 7)
+grid.arrange(p_ci_pres, p_psp_pres, ncol = 2, widths = c(0.65, 0.35))
+dev.off()
+
+```
+
+
+
+
+```{r}
+# ─────────────────────────────────────────────────────────────
+# Odds Ratios + PSP Tables (CSV incl. intercept; LaTeX w/o intercept)
+# Exports:
+#   • CSV (includes intercept):            OR_PSP_AllPredictors_Fixed.csv
+#   • LaTeX (paper, no Width cols):        OR_PSP_Table_NoIntercept_PAPER_Fixed.tex
+#   • LaTeX (presentation, with Width & %):OR_PSP_Table_NoIntercept_PRESENT_Fixed.tex
+# Notes:
+#   • ORs = exp of the 2.5%, 50%, 97.5% quantiles of β·Z (post-thinning).
+#   • PSP = Posterior Selection Probability = mean(Z).
+#   • LaTeX tables EXCLUDE intercept (as requested).
+#   • Rows ordered by PSP (high → low).
+# ─────────────────────────────────────────────────────────────
+
+
+
+# 2) Posterior quantiles of β·Z (log-odds)
+beta_q <- t(apply(BETA_ZLV_thinned, 2, quantile, probs = c(0.025, 0.5, 0.975)))
+beta_df <- data.frame(
+  Variable = rownames(beta_q),
+  Lower = beta_q[, 1],
+  Median = beta_q[, 2],
+  Upper = beta_q[, 3],
+  row.names = NULL
+)
+
+# 3) PSP (Posterior Selection Probability)
+psp <- colMeans(ZLV_thinned)
+psp_df <- data.frame(Variable = names(psp), PSP = as.numeric(psp))
+
+# 4) Merge and compute ORs (exp) and width metrics
+combined <- merge(beta_df, psp_df, by = "Variable", all.x = TRUE)
+combined$Label     <- pretty_name(combined$Variable)
+combined$OR_2.5    <- exp(combined$Lower)
+combined$OR_50     <- exp(combined$Median)
+combined$OR_97.5   <- exp(combined$Upper)
+combined$Width     <- combined$OR_97.5 - combined$OR_2.5                          # absolute width (OR-scale)
+combined$WidthPct  <- ifelse(combined$OR_50 == 0, NA_real_,
+                             100 * (combined$OR_97.5 - combined$OR_2.5) / combined$OR_50) # % shrinkage relative to OR_50
+
+# 5) Order by PSP (high → low)
+combined <- combined[order(-combined$PSP), ]
+
+# 6) CSV (INCLUDES INTERCEPT) for full record
+csv_out <- combined[, c("Variable", "Label", "OR_50", "OR_2.5", "OR_97.5", "Width", "WidthPct", "PSP")]
+write.csv(csv_out, "OR_PSP_AllPredictors_Fixed.csv", row.names = FALSE)
+
+# 7) LaTeX TABLES (EXCLUDE INTERCEPT)
+latex_df <- subset(combined, Variable != "(Intercept)")
+
+# Rounding for display
+latex_fmt <- within(latex_df, {
+  OR_2.5   <- round(OR_2.5,  3)
+  OR_50    <- round(OR_50,   3)
+  OR_97.5  <- round(OR_97.5, 3)
+  Width    <- round(Width,   3)
+  PSP      <- round(PSP,     3)
+  WidthPct <- round(WidthPct, 1)  # one decimal place in percent
+})
+
+# ── PAPER VERSION (no Width columns) ─────────────────────────
+latex_paper <- latex_fmt[, c("Label", "OR_50", "OR_2.5", "OR_97.5", "PSP")]
+colnames(latex_paper) <- c("Predictor", "Odds Ratio", "2.5\\% CI", "97.5\\% CI", "PSP")
+
+latex_code_paper <- knitr::kable(
+  latex_paper,
+  format  = "latex",
+  booktabs= TRUE,
+  align   = c("l","c","c","c","c"),
+  caption = "Odds ratios with 95\\% credible intervals and Posterior Selection Probability (PSP). Intercept excluded."
+)
+
+writeLines(latex_code_paper, con = "OR_PSP_Table_NoIntercept_PAPER_Fixed.tex")
+cat(latex_code_paper)  # also print to console
+
+# ── PRESENTATION VERSION (adds Width + % Shrinkage) ─────────
+latex_present <- latex_fmt[, c("Label", "OR_50", "OR_2.5", "OR_97.5", "Width", "WidthPct", "PSP")]
+# format percentage with % sign for LaTeX
+latex_present$WidthPct <- ifelse(is.na(latex_present$WidthPct),
+                                 "--",
+                                 paste0(latex_present$WidthPct, "\\%"))
+
+colnames(latex_present) <- c("Predictor", "Odds Ratio", "2.5\\% CI", "97.5\\% CI", "Width", "Width Shrinkage", "PSP")
+
+latex_code_present <- knitr::kable(
+  latex_present,
+  format  = "latex",
+  booktabs= TRUE,
+  align   = c("l","c","c","c","c","c","c"),
+  caption = "Odds ratios with 95\\% credible intervals, Width, Width Shrinkage, and Posterior Selection Probability (PSP). Intercept excluded."
+)
+
+writeLines(latex_code_present, con = "OR_PSP_Table_NoIntercept_PRESENT_Fixed.tex")
+cat(latex_code_present)  # also print to console
+
+```
+
+
+
+
+
+
+
+```{r}
+# Evaluating the Model on Test Data 
+predict_proba <- function(X, beta, zlv) {
+  plogis(X %*% (beta * zlv))
+}
+
+beta_mean <- colMeans(BETA_thinned)
+zlv_mean <- colMeans(ZLV_thinned)
+
+train_preds <- predict_proba(X_train, beta_mean, zlv_mean)
+#valid_preds <- predict_proba(X_valid, beta_mean, zlv_mean)
+test_preds <- predict_proba(X_test, beta_mean, zlv_mean)
+
+train_preds_binary <- ifelse(train_preds > 0.5, 1, 0)
+#valid_preds_binary <- ifelse(valid_preds > 0.5, 1, 0)
+test_preds_binary <- ifelse(test_preds > 0.5, 1, 0)
+
+# Calculating Performance Metrics
+calculate_metrics <- function(true_labels, pred_probs, pred_labels) {
+  roc_curve <- roc(true_labels, pred_probs)
+  auc <- auc(roc_curve)
+  confusion <- confusionMatrix(factor(pred_labels), factor(true_labels))
+  
+  accuracy <- confusion$overall['Accuracy']
+  f1 <- confusion$byClass['F1']
+  sensitivity <- confusion$byClass['Sensitivity']
+  specificity <- confusion$byClass['Specificity']
+  precision <- confusion$byClass['Precision']
+  error_rate <- 1 - accuracy
+  fpr <- 1 - specificity
+  fnr <- 1 - sensitivity
+  tnr <- specificity
+  
+  list(
+    Accuracy = accuracy,
+    F1_Score = f1,
+    Sensitivity = sensitivity,
+    Specificity = specificity,
+    Precision = precision,
+    Error_Rate = error_rate,
+    FPR = fpr,
+    FNR = fnr,
+    TNR = tnr,
+    AUC = auc
+  )
+}
+
+train_metrics <- calculate_metrics(y_train, train_preds, train_preds_binary)
+#valid_metrics <- calculate_metrics(y_valid, valid_preds, valid_preds_binary)
+test_metrics <- calculate_metrics(y_test, test_preds, test_preds_binary)
+
+metrics_df <- data.frame(
+  Metric = names(train_metrics),
+  Train = unlist(train_metrics),
+  #Validation = unlist(valid_metrics),
+  Test = unlist(test_metrics)
+)
+
+pdf("performance_metrics_comparison_OAM1.pdf", width = 8, height = 11)
+grid.table(metrics_df)
+dev.off()
+
+```
+
+
+
+
+
+
+
+```{r}
+# Step 1: Compute log-likelihood at each MCMC iteration
+loglik_samples <- numeric(nrow(BETA_thinned))
+for (i in 1:nrow(BETA_thinned)) {
+  loglik_samples[i] <- flogis.log(BETA_thinned[i, ], ZLV_thinned[i, ], X_train, y_train)
+}
+deviance_samples <- -2 * loglik_samples
+
+# Step 2: Posterior mean deviance
+D_bar <- mean(deviance_samples)
+
+# Step 3: Compute deviance at posterior mean of (beta * Z)
+# Note: this is the key correction — combining them first, then averaging
+beta_zlv_mean <- colMeans(BETA_thinned * ZLV_thinned)
+
+# Step 4: Evaluate deviance at this effective mean parameter vector
+# Set Z vector to 1 because you've already zeroed out coefficients
+D_hat <- -2 * flogis.log(beta_zlv_mean, rep(1, length(beta_zlv_mean)), X_train, y_train)
+
+# Step 5: Effective number of parameters
+p_D <- D_bar - D_hat
+
+# Step 6: Compute DIC
+DIC <- D_bar + p_D
+
+# Step 7: Print result
+cat("Posterior mean deviance (D̄):", round(D_bar, 2), "\n")
+cat("Deviance at mean (D̂):", round(D_hat, 2), "\n")
+cat("Effective number of parameters (pD):", round(p_D, 2), "\n")
+cat("Deviance Information Criterion (DIC):", round(DIC, 2), "\n")
+
+```
+
+
+
