@@ -1,0 +1,160 @@
+---
+title: "Top 50 Analysis"
+author: "Ayisha - TRU- T00727585"
+date: "2024-11-09"
+output: html_document
+---
+
+
+
+
+```{r setup, message=FALSE, warning=FALSE}
+# Load required libraries
+library(caret)        # For machine learning and data splitting
+library(dplyr)        # For data manipulation
+library(MASS)         # For statistical functions
+library(mvtnorm)      # For multivariate normal distributions
+library(ggplot2)      # For visualizations
+library(gridExtra)    # For arranging plots
+library(pROC)         # For ROC curve analysis
+library(stargazer)    # For creating well-formatted regression tables
+library(MCMCpack)     # For Bayesian inference tools
+library(grid)         # For low-level graphics
+
+```
+
+
+```{r}
+# Load the dataset 
+data <- read.csv("mergedData_clean.csv")  #  DSS as outcome and genes as predictors
+
+# Check for NA values and handle them by removing rows with NA values
+if (any(is.na(data))) {
+  data <- na.omit(data)
+  cat("NA values removed. Data dimensions:", dim(data), "\n")
+}
+
+# Remove zero-variance predictors
+nzv <- nearZeroVar(data, saveMetrics = TRUE)
+data <- data[, !nzv$nzv]
+cat("Data dimensions after removing zero-variance predictors:", dim(data), "\n")
+sum(is.na(data))
+
+```
+
+
+
+
+
+```{r data-loading-cleaning}
+
+# Load the dataset (ensure 'mergedData_clean.csv' is in the working directory)
+data <- read.csv("mergedData_clean.csv")  # DSS is the outcome; genes are predictors
+
+# Remove rows with missing values (NA)
+if (any(is.na(data))) {
+  data <- na.omit(data)
+  cat("Missing values removed. Data dimensions:", dim(data), "\n")
+}
+
+# Identify and remove zero-variance predictors
+nzv <- nearZeroVar(data, saveMetrics = TRUE)
+data <- data[, !nzv$nzv]
+cat("Data dimensions after removing zero-variance predictors:", dim(data), "\n")
+
+# Confirm there are no missing values left
+cat("Remaining NA count:", sum(is.na(data)), "\n")
+
+```
+
+
+```{r standardize-genes}
+# Standardize gene expression columns (excluding the DSS outcome)
+gene_data <- data %>%
+  dplyr::select(-DSS) %>%
+  mutate(across(everything(), scale))  # Apply z-score standardization
+
+# Combine the standardized gene data with DSS outcome
+data <- cbind(DSS = data$DSS, gene_data)
+
+```
+
+```{r top50-logistic-pvalues}
+# Calculate p-values for each gene using logistic regression (efficient approach)
+get_pvalue <- function(gene_name) {
+  model <- glm(DSS ~ data[[gene_name]], data = data, family = binomial)
+  p_value <- summary(model)$coefficients[2, 4]
+  return(data.frame(Gene = gene_name, PValue = p_value))
+}
+
+# Apply to all gene columns (excluding DSS)
+p_values <- do.call(rbind, lapply(names(data)[-1], get_pvalue))
+
+# Select top 50 genes with smallest p-values
+top_50_genes <- p_values %>%
+  arrange(PValue) %>%
+  slice_head(n = 50)
+
+# Save top 50 genes
+write.csv(top_50_genes, "top_50_genes_by_pvalue.csv", row.names = FALSE)
+```
+
+
+
+```{r subset-split-data}
+# Subset data to include DSS and the top 50 selected genes
+top_50_gene_names <- top_50_genes$Gene
+data_subset <- data %>%
+  dplyr::select(DSS, all_of(top_50_gene_names))
+
+# Save full subset
+write.csv(data_subset, "mergedData_top_50_genes_subset.csv", row.names = FALSE)
+
+# Split the dataset into training (80%) and testing (20%) sets
+set.seed(123)  # For reproducibility
+trainIndex <- createDataPartition(data_subset$DSS, p = 0.8, list = FALSE)
+trainData <- data_subset[trainIndex, ]
+testData  <- data_subset[-trainIndex, ]
+
+# Save train and test datasets
+write.csv(trainData, "training_data_tt.csv", row.names = FALSE)
+write.csv(testData,  "test_data_tt.csv", row.names = FALSE)
+
+# Output dataset dimensions
+cat("Training set dimensions:", dim(trainData), "\n")
+cat("Testing set dimensions:", dim(testData), "\n")
+
+```
+
+
+
+```{r summarize-dss}
+# Function: Count unique values and percentages for a categorical variable
+get_unique_counts_os <- function(data, column) {
+  counts <- data %>%
+    group_by(!!sym(column)) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    mutate(Percentage = round((Count / nrow(data)) * 100, 2)) %>%
+    arrange(desc(Count)) %>%
+    mutate(Column = column) %>%
+    dplyr::select(Column, everything())
+  
+  return(counts)
+}
+
+# Summary for full dataset
+unique_counts_full <- get_unique_counts_os(data_subset, "DSS")
+cat("Full Dataset:\n")
+print(unique_counts_full)
+
+# Summary for training set
+unique_counts_train <- get_unique_counts_os(trainData, "DSS")
+cat("\nTraining Set:\n")
+print(unique_counts_train)
+
+# Summary for testing set
+unique_counts_test <- get_unique_counts_os(testData, "DSS")
+cat("\nTesting Set:\n")
+print(unique_counts_test)
+
+```
