@@ -1,0 +1,459 @@
+---
+title: "Comparison of pip and width- gene"
+author: "Ayisha - TRU- T00727585"
+date: "2025-03-21"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+
+# Data
+df <- data.frame(
+  Group  = c("CAD", "BC"),
+  Mean   = c(0.852330995, 0.85980595),
+  Lower  = c(0.6631179,   0.7248877),
+  Upper  = c(0.9470668,   0.9281352)
+)
+
+pct <- scales::percent_format(accuracy = 1)
+
+ggplot(df, aes(x = Group)) +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.15) +  # 95% CI
+  geom_point(aes(y = Mean), size = 3) +                            # Posterior mean
+  scale_y_continuous(labels = pct, limits = c(0, 1)) +
+  labs(y = "Sparsity", x = NULL) +
+  theme_minimal(base_size = 12)
+
+```
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+
+# 1) Read both exports (from your earlier code)
+flex <- read.csv("OR_PSP_AllPredictors_flexible_CAD_Beta(1,1)_0.5.csv", stringsAsFactors = FALSE)
+fixd <- read.csv("OR_PSP_AllPredictors_fixed_CAD.csv",     stringsAsFactors = FALSE)
+
+# 2) Drop intercept
+flex <- subset(flex, Variable != "(Intercept)")
+fixd <- subset(fixd, Variable != "(Intercept)")
+
+# 3) Keep relevant columns and rename
+flex_keep <- flex[, c("Variable", "Label", "Width", "PSP", "Significant")]
+names(flex_keep) <- c("Variable", "Label", "Width_flexible", "PSP_flexible", "Sig_flexible")
+
+fixd_keep <- fixd[, c("Variable", "Label", "Width", "PSP", "Significant")]
+names(fixd_keep) <- c("Variable", "Label_fixed", "Width_fixed", "PSP_fixed", "Sig_fixed")
+
+# 4) Merge on Variable
+merged <- merge(flex_keep, fixd_keep, by = "Variable", all = FALSE)
+
+# Prefer flexible label if present
+merged$Label <- ifelse(is.na(merged$Label) | merged$Label == "",
+                       merged$Label_fixed, merged$Label)
+
+# 5) Compute Width Ratio (Flexible / Fixed)
+merged$Width_Ratio <- merged$Width_flexible / merged$Width_fixed
+
+# 6) Create Significance label for plotting
+merged$Significance <- ifelse(merged$Sig_flexible, "Significant", "Not Significant")
+merged$Significance <- factor(merged$Significance, levels = c("Significant", "Not Significant"))
+
+# 7) Save merged dataframe
+plot_df_cad <- merged[, c("Variable", "Label",
+                      "Width_fixed", "Width_flexible",
+                      "Width_Ratio", "PSP_flexible", "PSP_fixed", "Significance")]
+write.csv(plot_df_cad, "WidthRatio_PSP_merged_significance.csv", row.names = FALSE)
+
+# 8) Scatterplot: PSP (Flexible) vs Width Ratio, colored by significance
+p <- ggplot(plot_df_cad, aes(x = PSP_flexible, y = Width_Ratio, color = Significance)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point(size = 2.6, alpha = 0.9) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    x = "PSP (Flexible)",
+    y = "Width Ratio",
+    color = NULL,
+    title = " ",
+    #subtitle = "Dashed line: equal CI width (Flexible = Fixed)"
+  ) +
+  theme_minimal(base_size = 12)+
+theme(legend.position = "none")
+  #+theme(legend.position = "bottom")
+
+
+ggsave("PSP_vs_WidthRatio_scatter_CAD_.pdf", p, width = 7, height = 5)
+print(p)
+
+```
+```{r}
+library(ggplot2)
+
+# 1) Read both exports (ensure they include 'Significant' column)
+flex <- read.csv("LOGODDS_PSP_AllPredictors_flexible_BC_.csv", stringsAsFactors = FALSE)
+fixd <- read.csv("LOGODDS_PSP_AllPredictors_fixed_BC.csv",     stringsAsFactors = FALSE)
+
+# 2) Drop intercept
+flex <- subset(flex, Variable != "(Intercept)")
+fixd <- subset(fixd, Variable != "(Intercept)")
+
+# 3) Keep relevant columns and rename
+flex_keep <- flex[, c("Variable", "Label", "Width", "PSP", "Significant")]
+names(flex_keep) <- c("Variable", "Label", "Width_flexible", "PSP_flexible", "Sig_flexible")
+
+fixd_keep <- fixd[, c("Variable", "Label", "Width", "PSP", "Significant")]
+names(fixd_keep) <- c("Variable", "Label_fixed", "Width_fixed", "PSP_fixed", "Sig_fixed")
+
+# 4) Merge on Variable
+merged <- merge(flex_keep, fixd_keep, by = "Variable", all = FALSE)
+
+# Prefer flexible label if present
+merged$Label <- ifelse(is.na(merged$Label) | merged$Label == "",
+                       merged$Label_fixed, merged$Label)
+
+# 5) Compute Width Ratio (Flexible / Fixed)
+merged$Width_Ratio <- merged$Width_flexible / merged$Width_fixed
+
+# 6) Create Significance label for plotting
+merged$Significance <- ifelse(merged$Sig_flexible, "Significant", "Not Significant")
+merged$Significance <- factor(merged$Significance, levels = c("Significant", "Not Significant"))
+
+# 7) Save merged dataframe
+plot_df_BC <- merged[, c("Variable", "Label",
+                      "Width_fixed", "Width_flexible",
+                      "Width_Ratio", "PSP_flexible", "PSP_fixed", "Significance")]
+write.csv(plot_df_BC, "WidthRatio_PSP_merged_significance.csv", row.names = FALSE)
+
+# 8) Scatterplot: PSP (Flexible) vs Width Ratio, colored by significance
+p <- ggplot(plot_df_BC, aes(x = PSP_flexible, y = Width_Ratio, color = Significance)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point(size = 2.6, alpha = 0.9) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    x = "PSP (Flexible)",
+    y = " ",
+    color = NULL,
+    title = " ",
+    #subtitle = "Dashed line: equal CI width (Flexible = Fixed)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+  #theme(legend.position = "bottom")
+
+# 9) Save the plot
+ggsave("PSP_vs_WidthRatio_scatter_significance_BC.pdf", p, width = 7, height = 5)
+print(p)
+
+```
+
+```{r}
+library(dplyr)
+
+mean_ratios <- plot_df_cad %>%
+  group_by(Significance) %>%
+  summarise(
+    Mean_Ratio = mean(Width_Ratio, na.rm = TRUE),
+    SD_Ratio   = sd(Width_Ratio, na.rm = TRUE),
+    n          = n()
+  )
+
+print(mean_ratios)
+
+
+```
+
+
+```{r}
+library(dplyr)
+
+mean_ratios <- plot_df_BC %>%
+  group_by(Significance) %>%
+  summarise(
+    Mean_Ratio = mean(Width_Ratio, na.rm = TRUE),
+    SD_Ratio   = sd(Width_Ratio, na.rm = TRUE),
+    n          = n()
+  )
+
+print(mean_ratios)
+
+```
+
+```{r}
+
+library(ggplot2)
+
+# 1) Read both exports (from your earlier code)
+flex <- read.csv("OR_PSP_AllPredictors_flexible_BC.csv", stringsAsFactors = FALSE)
+fixd <- read.csv("OR_PSP_AllPredictors_fixed_BC.csv",     stringsAsFactors = FALSE)
+
+# 2) Drop intercept (plot/compare only predictors)
+flex <- subset(flex, Variable != "(Intercept)")
+fixd <- subset(fixd, Variable != "(Intercept)")
+
+# 3) Keep only the columns we need and rename to avoid collisions
+flex_keep <- flex[, c("Variable", "Label", "Width", "PSP")]
+names(flex_keep) <- c("Variable", "Label", "Width_flexible", "PSP_flexible")
+
+fixd_keep <- fixd[, c("Variable", "Label", "Width", "PSP")]
+names(fixd_keep) <- c("Variable", "Label_fixed", "Width_fixed", "PSP_fixed")
+
+# 4) Merge by Variable (keeps predictors present in both)
+merged <- merge(flex_keep, fixd_keep, by = "Variable", all = FALSE)
+
+# If labels differ across files, prefer the flexible label when available
+merged$Label <- ifelse(is.na(merged$Label) | merged$Label == "",
+                       merged$Label_fixed, merged$Label)
+
+# 5) Compute Width Ratio (Flexible / Fixed)
+merged$Width_Ratio <- merged$Width_flexible / merged$Width_fixed
+
+# 6) Optional: flag narrower/wider than fixed for coloring in the plot
+merged$Width_flag <- ifelse(
+  is.na(merged$Width_Ratio), "NA",
+  ifelse(merged$Width_Ratio < 1, "Narrower (Flex < Fixed)",
+         ifelse(merged$Width_Ratio > 1, "Wider (Flex > Fixed)", "Equal"))
+)
+
+# 7) Save a clean CSV for plotting/records
+plot_df <- merged[, c("Variable", "Label",
+                      "Width_fixed", "Width_flexible",
+                      "Width_Ratio", "PSP_flexible", "PSP_fixed", "Width_flag")]
+write.csv(plot_df, "WidthRatio_PSP_merged.csv", row.names = FALSE)
+
+# 8) Scatterplot: PSP (Flexible) vs Width Ratio
+#    - dashed line at ratio = 1 (same width)
+#    - x in [0,1]
+#    - optional log scale on y if ratios are skewed; comment/uncomment as you like
+
+p <- ggplot(plot_df, aes(x = PSP_flexible, y = Width_Ratio, color = Width_flag)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point(size = 2.6, alpha = 0.9) +
+  scale_x_continuous(limits = c(0, 1)) +
+  # If ratios span wide range, log scale helps:
+  # scale_y_log10() +
+  labs(
+    x = "PSP (Flexible)",
+    y = "Width Ratio (Flexible / Fixed)",
+    color = NULL,
+    title = "PSP (Flexible) vs. Width Ratio",
+    subtitle = "Dashed line: equal CI width (Flexible = Fixed)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+
+ggsave("PSP_vs_WidthRatio_scatter_BC.pdf", p, width = 7, height = 5)
+print(p)
+
+
+```
+
+
+
+
+```{r}
+library(ggplot2)
+
+# 1) Read both exports (from your earlier code)
+flex <- read.csv("OR_PSP_AllPredictors_flexible_CAD.csv", stringsAsFactors = FALSE)
+fixd <- read.csv("OR_PSP_AllPredictors_fixed_CAD.csv",     stringsAsFactors = FALSE)
+
+# 2) Drop intercept (plot/compare only predictors)
+flex <- subset(flex, Variable != "(Intercept)")
+fixd <- subset(fixd, Variable != "(Intercept)")
+
+# 3) Keep only the columns we need and rename to avoid collisions
+#    ALSO bring flexible CI bounds so we can assess significance
+flex_keep <- flex[, c("Variable", "Label", "OR_2.5", "OR_97.5", "Width", "PSP")]
+names(flex_keep) <- c("Variable", "Label", "OR2p5_flex", "OR97p5_flex", "Width_flexible", "PSP_flexible")
+
+fixd_keep <- fixd[, c("Variable", "Label", "Width", "PSP")]
+names(fixd_keep) <- c("Variable", "Label_fixed", "Width_fixed", "PSP_fixed")
+
+# 4) Merge by Variable (keeps predictors present in both)
+merged <- merge(flex_keep, fixd_keep, by = "Variable", all = FALSE)
+
+# Prefer the flexible label when available
+merged$Label <- ifelse(is.na(merged$Label) | merged$Label == "", merged$Label_fixed, merged$Label)
+
+# 5) Compute Width Ratio (Flexible / Fixed)
+merged$Width_Ratio <- merged$Width_flexible / merged$Width_fixed
+
+# 6) Flexible significance flag (CI excludes 1 on OR scale)
+merged$Significance <- ifelse( (merged$OR2p5_flex > 1 & merged$OR97p5_flex > 1) |
+                               (merged$OR2p5_flex < 1 & merged$OR97p5_flex < 1),
+                               "Significant", "Not significant")
+
+# (Optional) Keep old width-flag if you still want it in the CSV
+merged$Width_flag <- ifelse(
+  is.na(merged$Width_Ratio), "NA",
+  ifelse(merged$Width_Ratio < 1, "Narrower (Flex < Fixed)",
+         ifelse(merged$Width_Ratio > 1, "Wider (Flex > Fixed)", "Equal"))
+)
+
+# 7) Save a clean CSV for plotting/records (now includes significance)
+plot_df <- merged[, c("Variable", "Label",
+                      "OR2p5_flex", "OR97p5_flex",
+                      "Width_fixed", "Width_flexible",
+                      "Width_Ratio", "PSP_flexible", "PSP_fixed",
+                      "Significance", "Width_flag")]
+write.csv(plot_df, "WidthRatio_PSP_merged.csv", row.names = FALSE)
+
+# 8) Scatterplot: PSP (Flexible) vs Width Ratio, colored by Significance
+p <- ggplot(plot_df, aes(x = PSP_flexible, y = Width_Ratio, color = Significance)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point(size = 2.8, alpha = 0.9) +
+  scale_color_manual(values = c("Significant" = "red", "Not significant" = "blue")) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    x = "PSP (Flexible)",
+    y = "Width Ratio (Flexible / Fixed)",
+    color = NULL,
+    title = "PSP (Flexible) vs Width Ratio",
+    subtitle = "Dashed line: equal CI width (Flexible = Fixed); color = significance (flexible CI excludes 1)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+
+ggsave("PSP_vs_WidthRatio_significance.pdf", p, width = 7, height = 5)
+print(p)
+
+```
+
+
+```{r}
+library(ggplot2)
+
+# 1) Read both exports (from your earlier code)
+flex <- read.csv("OR_PSP_AllPredictors_flexible_BC.csv", stringsAsFactors = FALSE)
+fixd <- read.csv("OR_PSP_AllPredictors_fixed_BC.csv",     stringsAsFactors = FALSE)
+
+# 2) Drop intercept (plot/compare only predictors)
+flex <- subset(flex, Variable != "(Intercept)")
+fixd <- subset(fixd, Variable != "(Intercept)")
+
+# 3) Keep only the columns we need and rename to avoid collisions
+#    ALSO bring flexible CI bounds so we can assess significance
+flex_keep <- flex[, c("Variable", "Label", "OR_2.5", "OR_97.5", "Width", "PSP")]
+names(flex_keep) <- c("Variable", "Label", "OR2p5_flex", "OR97p5_flex", "Width_flexible", "PSP_flexible")
+
+fixd_keep <- fixd[, c("Variable", "Label", "Width", "PSP")]
+names(fixd_keep) <- c("Variable", "Label_fixed", "Width_fixed", "PSP_fixed")
+
+# 4) Merge by Variable (keeps predictors present in both)
+merged <- merge(flex_keep, fixd_keep, by = "Variable", all = FALSE)
+
+# Prefer the flexible label when available
+merged$Label <- ifelse(is.na(merged$Label) | merged$Label == "", merged$Label_fixed, merged$Label)
+
+# 5) Compute Width Ratio (Flexible / Fixed)
+merged$Width_Ratio <- merged$Width_flexible / merged$Width_fixed
+
+# 6) Flexible significance flag (CI excludes 1 on OR scale)
+merged$Significance <- ifelse( (merged$OR2p5_flex >= 1 & merged$OR97p5_flex > 1) |
+                               (merged$OR2p5_flex <= 1 & merged$OR97p5_flex < 1),
+                               "Significant", "Not significant")
+
+# (Optional) Keep old width-flag if you still want it in the CSV
+merged$Width_flag <- ifelse(
+  is.na(merged$Width_Ratio), "NA",
+  ifelse(merged$Width_Ratio < 1, "Narrower (Flex < Fixed)",
+         ifelse(merged$Width_Ratio > 1, "Wider (Flex > Fixed)", "Equal"))
+)
+
+# 7) Save a clean CSV for plotting/records (now includes significance)
+plot_df <- merged[, c("Variable", "Label",
+                      "OR2p5_flex", "OR97p5_flex",
+                      "Width_fixed", "Width_flexible",
+                      "Width_Ratio", "PSP_flexible", "PSP_fixed",
+                      "Significance", "Width_flag")]
+write.csv(plot_df, "WidthRatio_PSP_merged.csv", row.names = FALSE)
+
+# 8) Scatterplot: PSP (Flexible) vs Width Ratio, colored by Significance
+p <- ggplot(plot_df, aes(x = PSP_flexible, y = Width_Ratio, color = Significance)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point(size = 2.8, alpha = 0.9) +
+  scale_color_manual(values = c("Significant" = "red", "Not significant" = "blue")) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    x = "PSP (Flexible)",
+    y = "Width Ratio (Flexible / Fixed)",
+    color = NULL,
+    title = "PSP (Flexible) vs Width Ratio",
+    subtitle = "Dashed line: equal CI width (Flexible = Fixed); color = significance (flexible CI excludes 1)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+
+ggsave("PSP_vs_WidthRatio_significance.pdf", p, width = 7, height = 5)
+print(p)
+
+```
+
+
+
+
+```{r}
+# Load packages
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Grid of θ values
+theta_vals <- seq(0, 1, length.out = 1000)
+
+# Beta priors
+prior_df <- tibble(
+  theta = theta_vals,
+  #`Beta(1,1)` = dbeta(theta_vals, 1, 1),
+  `Beta(2,2)` = dbeta(theta_vals, 2, 2),
+  `Beta(4,4)` = dbeta(theta_vals, 4, 4),
+  `Beta(8,8)` = dbeta(theta_vals, 8, 8)
+)
+
+# Truncated Laplace
+Laplace_CDF <- function(x, mu, b) {
+  ifelse(x <= mu, 0.5 * exp((x - mu)/b), 1 - 0.5 * exp(-(x - mu)/b))
+}
+
+dlaplace_trunc <- function(x, mu = 0.5, b = 0.1086) {
+  Z <- Laplace_CDF(1, mu, b) - Laplace_CDF(0, mu, b)
+  dens <- (1 / (2 * b)) * exp(-abs(x - mu) / b)
+  ifelse(x > 0 & x < 1, dens / Z, 0)
+}
+
+prior_df$`Laplace(0.5, 0.1086)` <- dlaplace_trunc(prior_df$theta)
+
+# Convert to long format
+prior_long <- pivot_longer(prior_df, -theta, names_to = "Prior", values_to = "Density")
+
+# Plot
+ggplot(prior_long, aes(x = theta, y = Density, color = Prior)) +
+  geom_line(size = 1) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "grey40") +
+  scale_color_manual(values = c(
+    #"Beta(1,1)" = "#1b9e77",
+    "Beta(2,2)" = "#d95f02",
+    "Beta(4,4)" = "#7570b3",
+    "Beta(8,8)" = "#e7298a",
+    "Laplace(0.5, 0.1086)" = "#66a61e"
+  )) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    title = " ",
+    x = expression(theta),
+    y = "Prior densities"
+  )
+ggsave("prior_comparison_clean.png", width = 8, height = 5, dpi = 300)
+
+```
+
